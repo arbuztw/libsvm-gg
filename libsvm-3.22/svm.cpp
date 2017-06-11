@@ -3180,3 +3180,116 @@ void svm_set_print_string_function(void (*print_func)(const char *))
 	else
 		svm_print_string = print_func;
 }
+
+void knkmeans(const double *K, const int *indices, const int size, const int offset, const int ncluster, const int max_iter, int *cluster, int *csize)
+{
+	int *label = Malloc(int, size);
+	int *current = Malloc(int, size);
+	double *cluster_avg = Malloc(double, ncluster);
+
+	for (int i = 0; i < size; i++)
+		label[i] = rand() % ncluster;
+
+	for (int iter = 0; iter < max_iter + 1; iter++) {
+		for (int i = 0; i < ncluster; i++)
+			csize[i] = 0;
+		for (int i = 0; i < size; i++)
+			csize[label[i]]++;
+		int sum = 0;
+		for (int i = 0; i < ncluster; i++) {
+			current[i] = sum;
+			sum += csize[i];
+		}
+		for (int i = 0; i < size; i++) {
+			int &idx = current[label[i]];
+			cluster[idx] = indices[i];
+			idx++;
+		}
+		if (iter == max_iter)
+			break;
+
+		/* cluster average */
+		for (int i = 0; i < ncluster; i++) {
+			int start = 0;
+			cluster_avg[i] = 0;
+			for (int j = start; j < start+csize[i]; j++) {
+				int idx_j = cluster[j];
+				cluster_avg[i] += K[idx_j][idx_j];
+				for (int k = start+1; k < start+csize[i]; k++) {
+					int idx_k = cluster[k];
+					cluster_avg[i] += K[idx_j][idx_k] * 2;
+				}
+			}
+			cluster_avg[i] /= (csize[i] * csize[i]);
+			start += csize[i];
+		}
+
+		for (int i = 0; i < size; i++) {
+			int start = 0;
+			double mn = INF;
+			int idx_i = cluster[i];
+			label[i] = 0;
+			for (int j = 0; j < ncluster; j++) {
+				double dist = 0;
+				for (int k = start; k < start+csize[j]; k++) {
+					int idx_k = cluster[k];
+					dist += K[ idx_i ][ idx_k ];
+				}
+				dist /= csize[j];
+				start += csize[j];
+
+				if (cluster_avg[j] - 2*dist < mn) {
+					mn = cluster_avg[j] - 2*dist;
+					label[i] = j;
+				}
+			}
+		}
+	}
+
+	free(label);
+	free(current);
+	free(cluster_avg);
+
+}
+
+void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int **label)
+{
+	int lvl = 4, kk = 4, max_iter = 20;
+	int n_sample = std::min(prob->l, 2000);
+	int *perms = Malloc(int, prob->l);
+	svm_node *sample[2000];
+
+	for (int i = 0; i < prob->l; i++)
+		perms[i] = i;
+	std::next_permutation(perms, perms+prob->l);
+
+	for (int i = 0; i < n_sample; i++)
+		sample[i] = prob->x[perms[i]];
+
+//	free(perms);
+
+	double **Ksample = Malloc(double*, n_sample);
+	for (int i = 0; i < n_sample; i++) {
+		Ksample[i] = Malloc(double, n_sample);
+		for (int j = 0; j < n_sample; j++)
+			Ksample[i][j] = Kernel::k_function(sample[i], sample[j], *param);
+	}
+
+	int clusters[8][2000];
+	int csize[8][256];
+
+	for (int i = 1; i < lvl; i++) {
+		int cid = 0;
+		int kk = (int)pow(k, i);
+		int offset = 0;
+		for (int j = 0; j < kk; j++) {
+			if (csize[i-1][j] == 0) continue;
+			knkmeans(Ksample, &clusters[i-1][offset], csize[i-1][j], cid, k, max_iter, &clusters[i][offset], &csize[i][cid]);
+			offset += csize[i-1][j];
+			cid += k;
+		}
+	}
+
+
+
+}
