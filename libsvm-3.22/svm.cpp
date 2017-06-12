@@ -8,6 +8,7 @@
 #include <limits.h>
 #include <locale.h>
 #include <algorithm>
+#include <iostream>
 #include "svm.h"
 int libsvm_version = LIBSVM_VERSION;
 typedef float Qfloat;
@@ -1438,6 +1439,58 @@ private:
 //
 // construct and solve various formulations
 //
+
+static void solve_c_svc_dcsvm(
+	const svm_problem *prob, const svm_parameter* param,
+	double *alpha, Solver::SolutionInfo* si, double Cp, double Cn)
+{
+    /*
+	int l = prob->l;
+	double *minus_ones = new double[l];
+	schar *y = new schar[l];
+
+	int i;
+
+	for(i=0;i<l;i++)
+	{
+		alpha[i] = 0;
+		minus_ones[i] = -1;
+		if(prob->y[i] > 0) y[i] = +1; else y[i] = -1;
+	}
+
+	Solver s;
+	s.Solve(l, SVC_Q(*prob,*param,y), minus_ones, y,
+		alpha, Cp, Cn, param->eps, si, param->shrinking);
+
+	double *alpha_working = new double[l];
+	for(i=ll-1;i>=0;i--){
+
+		for(int k=0;k<ksub;k++){
+			// setup alpha_working and prob->x, y
+
+			s.Solve(l, SVC_Q(*prob,*param,y), minus_ones, y,
+				alpha_working, Cp, Cn, param->eps, si, param->shrinking);
+		
+			// need to update alpha_working
+		}
+	}
+
+	double sum_alpha=0;
+	for(i=0;i<l;i++)
+		sum_alpha += alpha[i];
+
+	if (Cp==Cn)
+		info("nu = %f\n", sum_alpha/(Cp*prob->l));
+
+	for(i=0;i<l;i++)
+		alpha[i] *= y[i];
+
+	delete[] minus_ones;
+	delete[] y;
+    */
+}
+
+
 static void solve_c_svc(
 	const svm_problem *prob, const svm_parameter* param,
 	double *alpha, Solver::SolutionInfo* si, double Cp, double Cn)
@@ -1649,12 +1702,30 @@ static decision_function svm_train_one(
 	const svm_problem *prob, const svm_parameter *param,
 	double Cp, double Cn)
 {
-	double *alpha = Malloc(double,prob->l);
+    int eze = 4, nchild = 4;
+    int **full_cidx = Malloc(int*, eze);
+    int **full_csize = Malloc(int*, eze);
+    for(int i = 0 ; i < eze ; i++) {
+        full_cidx[i] = Malloc(int, prob->l);
+        full_csize[i] = Malloc(int, prob->l);
+    }
+    
+    leveled_knkmeans(param, prob, full_cidx, full_csize);
+    std::cerr << "end leveled kmeans\n";
+
+
+    for(int i = 0 ; i < nchild ; i++){
+        info("%d ", full_csize[1][i]);
+    }
+    info("\n");
+    
+    double *alpha = Malloc(double,prob->l);
 	Solver::SolutionInfo si;
 	switch(param->svm_type)
 	{
 		case C_SVC:
 			solve_c_svc(prob,param,alpha,&si,Cp,Cn);
+			//solve_c_svc_dcsvm(prob, param, alpha, &si, Cp, Cn);
 			break;
 		case NU_SVC:
 			solve_nu_svc(prob,param,alpha,&si);
@@ -3210,8 +3281,8 @@ void knkmeans(double **K, const int *indices, const int msize, const int offset,
 			break;
 
 		/* cluster average */
+		int start = 0;
 		for (int i = 0; i < ncluster; i++) {
-			int start = 0;
 			cluster_avg[i] = 0;
 			for (int j = start; j < start+csize[i]; j++) {
 				int idx_j = cluster[j];
@@ -3318,7 +3389,7 @@ void knkmeans_predict_alllevel(const svm_parameter *param, const svm_problem *pr
 
 void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int **full_cidx, int **full_csize)
 {
-	int lvl = 4, nchild = 4, max_iter = 20;
+	int lvl = 2, nchild = 4, max_iter = 20;
 	int msize = std::min(prob->l, 2000);
 	int *perms = Malloc(int, prob->l);
 	svm_node *sample[2000];
@@ -3333,8 +3404,9 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int *
 	double **Ksample = Malloc(double*, msize);
 	for (int i = 0; i < msize; i++) {
 		Ksample[i] = Malloc(double, msize);
-		for (int j = 0; j < msize; j++)
+		for (int j = 0; j < msize; j++) {
 			Ksample[i][j] = Kernel::k_function(sample[i], sample[j], *param);
+        }
 	}
 
 	int **sub_cidx = Malloc(int*, lvl);
@@ -3345,6 +3417,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int *
 		sub_csize[i] = Malloc(int, msize);
 	}
 
+    std::cerr << "start sample kmeans\n";
 	double **cluster_avg = Malloc(double*, lvl);
 
 	for (int i = 0; i < msize; i++)
@@ -3363,6 +3436,13 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int *
 			cid += nchild;
 		}
 	}
+
+    for (int i = 1 ; i < lvl ; i++) {
+        for (int j = 0 ; j < nchild ; j++) {
+            info("%d ", sub_csize[i][j]);
+        }
+        info("\n");
+    }
 
 	for (int i = 1; i < lvl; i++)
 		for (int j = 0; j < msize; j++)
