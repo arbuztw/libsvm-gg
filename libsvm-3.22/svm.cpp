@@ -2054,7 +2054,7 @@ static void svm_group_classes(const svm_problem *prob, int *nr_class_ret, int **
 	// However, for two-class sets with -1/+1 labels and -1 appears first, 
 	// we swap labels to ensure that internally the binary SVM has positive data corresponding to the +1 instances.
 	//
-	if Gnr_class == 2 && label[0] == -1 && label[1] == 1)
+	if (nr_class == 2 && label[0] == -1 && label[1] == 1)
 	{
 		swap(label[0],label[1]);
 		swap(count[0],count[1]);
