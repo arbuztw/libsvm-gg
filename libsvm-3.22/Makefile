@@ -23,6 +23,6 @@ svm-train: svm-train.c svm.o gtsvm
 svm-scale: svm-scale.c
 	$(CXX) $(CFLAGS) svm-scale.c -o svm-scale
 svm.o: svm.cpp svm.h
-	$(CXX) -I../GTSVM/lib -DUSE_GTSVM $(CFLAGS) -c svm.cpp
+	$(CXX) -I../GTSVM/lib $(CFLAGS) -c svm.cpp
 clean:
 	rm -f *~ svm.o svm-train svm-predict svm-scale libsvm.so.$(SHVER)
