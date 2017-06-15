@@ -1463,7 +1463,7 @@ static void solve_c_svc_gtsvm(
 			kernel = GTSVM_KERNEL_SIGMOID;
 			break;
 		default:
-			fprintf(stderr, "Unexpected kernel_type %d\n", param->kernel_type);
+			fprintf(stderr, "ERROR: unexpected kernel_type %d\n", param->kernel_type);
 			exit(1);
 	}
 
@@ -1568,9 +1568,9 @@ static void solve_c_svc(
 	double *alpha, Solver::SolutionInfo* si, double Cp, double Cn)
 {
 	if (!(Cp == param->C && Cn == param->C))
-		fprintf(stderr, "WARNING: Weighted C not supported, disabling GTSVM\n");
+		fprintf(stderr, "WARNING: weighted C not supported, disabling GTSVM\n");
 	else if (param->kernel_type == PRECOMPUTED)
-		fprintf(stderr, "WARNING: Precomputed kernel not supported, disabling GTSVM\n");
+		fprintf(stderr, "WARNING: precomputed kernel not supported, disabling GTSVM\n");
 	else
 		return solve_c_svc_gtsvm(prob, param, alpha, si, Cp, Cn);
 
