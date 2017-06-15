@@ -1437,7 +1437,7 @@ private:
 	double *QD;
 };
 
-static void solve_c_svc_gtsvm(
+static void gtsvm_solve_c_svc(
 	const svm_problem *prob, const svm_parameter* param,
 	double *alpha, Solver::SolutionInfo* si, double Cp, double Cn)
 {
@@ -1572,7 +1572,7 @@ static void solve_c_svc(
 	else if (param->kernel_type == PRECOMPUTED)
 		fprintf(stderr, "WARNING: precomputed kernel not supported, disabling GTSVM\n");
 	else
-		return solve_c_svc_gtsvm(prob, param, alpha, si, Cp, Cn);
+		return gtsvm_solve_c_svc(prob, param, alpha, si, Cp, Cn);
 
 	int l = prob->l;
 	double *minus_ones = new double[l];
