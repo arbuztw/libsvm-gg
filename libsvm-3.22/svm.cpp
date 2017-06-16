@@ -1528,7 +1528,8 @@ static void gtsvm_solve_c_svc(
 		gparam.gamma,
 		gparam.coef0,
 		gparam.degree,
-		true,  // biased
+		//true,  // biased
+		false,
 		false,  // smallClusters
 		64  // activeClusters
 	));
@@ -1537,6 +1538,17 @@ static void gtsvm_solve_c_svc(
 	int const max_iter = max(10000000, prob->l > INT_MAX / 100 ? INT_MAX : 100 * prob->l);
 	int const repetitions = 256;    // must be a multiple of 16
 	int counter = min(prob->l, 1000) + 1;
+
+	for (int i = 0; i < prob->l; i++)
+	{
+		alpha[i] *= prob->y[i];
+		if (alpha[i] < 0)
+		{
+			info("QWQ\n");
+			exit(1);
+		}
+	}
+	GTSVM_CHECK(GTSVM_SetAlphas(context, alpha, GTSVM_TYPE_DOUBLE, false));
 
 	double primal = INF, dual = -INF;
 
@@ -1549,6 +1561,7 @@ static void gtsvm_solve_c_svc(
 		}
 
 		GTSVM_CHECK(GTSVM_Optimize(context, &primal, &dual, repetitions));
+		//info("%f %f\n", primal, dual);
 
 		if (2 * (primal - dual) < param->eps * (primal + dual))
 			break;
@@ -1576,57 +1589,6 @@ static void gtsvm_solve_c_svc(
 //
 // construct and solve various formulations
 //
-
-static void solve_c_svc_dcsvm(
-	const svm_problem *prob, const svm_parameter* param,
-	double *alpha, Solver::SolutionInfo* si, double Cp, double Cn)
-{
-    /*
-	int l = prob->l;
-	double *minus_ones = new double[l];
-	schar *y = new schar[l];
-
-	int i;
-
-	for(i=0;i<l;i++)
-	{
-		alpha[i] = 0;
-		minus_ones[i] = -1;
-		if(prob->y[i] > 0) y[i] = +1; else y[i] = -1;
-	}
-
-	Solver s;
-	s.Solve(l, SVC_Q(*prob,*param,y), minus_ones, y,
-		alpha, Cp, Cn, param->eps, si, param->shrinking);
-
-	double *alpha_working = new double[l];
-	for(i=ll-1;i>=0;i--){
-
-		for(int k=0;k<ksub;k++){
-			// setup alpha_working and prob->x, y
-
-			s.Solve(l, SVC_Q(*prob,*param,y), minus_ones, y,
-				alpha_working, Cp, Cn, param->eps, si, param->shrinking);
-		
-			// need to update alpha_working
-		}
-	}
-
-	double sum_alpha=0;
-	for(i=0;i<l;i++)
-		sum_alpha += alpha[i];
-
-	if (Cp==Cn)
-		info("nu = %f\n", sum_alpha/(Cp*prob->l));
-
-	for(i=0;i<l;i++)
-		alpha[i] *= y[i];
-
-	delete[] minus_ones;
-	delete[] y;
-    */
-}
-
 
 static void solve_c_svc(
 	const svm_problem *prob, const svm_parameter* param,
@@ -1846,44 +1808,94 @@ static decision_function svm_train_one(
 	const svm_problem *prob, const svm_parameter *param,
 	double Cp, double Cn)
 {
-    int eze = 5, nchild = 4;
-    int **full_cidx = Malloc(int*, eze);
-    int **full_csize = Malloc(int*, eze);
-    for(int i = 0 ; i < eze ; i++) {
-        full_cidx[i] = Malloc(int, prob->l);
-		int ncluster = (int)pow(nchild, i);
-        full_csize[i] = Malloc(int, ncluster);
-    }
-    
-    leveled_knkmeans(param, prob, full_cidx, full_csize);
-    std::cerr << "end leveled kmeans\n";
-
-
-    for(int i = 0 ; i < nchild ; i++){
-        info("%d ", full_csize[1][i]);
-    }
-    info("\n");
-    
-    double *alpha = Malloc(double,prob->l);
+	double *alpha = Malloc(double,prob->l);
+	memset(alpha, 0, sizeof(double)*prob->l);
 	Solver::SolutionInfo si;
-	switch(param->svm_type)
-	{
-		case C_SVC:
-			solve_c_svc(prob,param,alpha,&si,Cp,Cn);
-			//solve_c_svc_dcsvm(prob, param, alpha, &si, Cp, Cn);
-			break;
-		case NU_SVC:
-			solve_nu_svc(prob,param,alpha,&si);
-			break;
-		case ONE_CLASS:
-			solve_one_class(prob,param,alpha,&si);
-			break;
-		case EPSILON_SVR:
-			solve_epsilon_svr(prob,param,alpha,&si);
-			break;
-		case NU_SVR:
-			solve_nu_svr(prob,param,alpha,&si);
-			break;
+	if(param->svm_type == C_SVC){
+		int eze = 2, nchild = 4;
+		int **full_cidx = Malloc(int*, eze);
+		int **full_csize = Malloc(int*, eze);
+		for(int i = 0 ; i < eze ; i++) {
+			full_cidx[i] = Malloc(int, prob->l);
+			int ncluster = (int)pow(nchild, i);
+			full_csize[i] = Malloc(int, ncluster);
+		}
+
+		leveled_knkmeans(param, prob, full_cidx, full_csize);
+		std::cerr << "end leveled kmeans\n";
+
+		for(int ll = 1 ; ll < 2 ; ll++){
+			int nll = (int)pow(nchild, ll);
+			for(int i = 0 ; i < nll ; i++){
+				info("%d ", full_csize[ll][i]);
+			}
+			info("\n");
+		/*
+			for(int i = 0 ; i < prob->l ; i++){
+				info("%d ", full_cidx[ll][i]);
+			}
+			info("\n");
+		*/
+		}
+
+
+		// one-time allocating for each sub-problem
+		double *sub_alpha = Malloc(double,prob->l);
+		svm_problem sub_prob;
+		sub_prob.l = prob->l;
+		sub_prob.x = Malloc(svm_node *,sub_prob.l);
+		sub_prob.y = Malloc(double,sub_prob.l);
+
+		for(int ll = eze-1 ; ll >= 1 ; ll--) {
+			int ncluster = (int)pow(nchild, ll);
+			int start = 0;
+			for(int j = 0 ; j < ncluster ; j++) {
+
+				Solver::SolutionInfo subsi;
+				int csize = full_csize[ll][j];
+				for(int k = 0 ; k < csize ; k++) {
+					sub_prob.x[k] = prob->x[full_cidx[ll][k+start]];
+					sub_prob.y[k] = prob->y[full_cidx[ll][k+start]];
+					sub_alpha[k] = alpha[full_cidx[ll][k+start]];
+				}
+				sub_prob.l = csize;
+				info("csize %d\n", csize);
+
+				solve_c_svc(&sub_prob,param,sub_alpha,&subsi,Cp,Cn);
+
+				if(subsi.rho != 0) {
+					info("rho should be 0\n");
+					exit(1);
+				}
+
+				for(int k = 0 ; k < csize ; k++) {
+					alpha[full_cidx[ll][k+start]] = sub_alpha[k];
+				}
+				start += csize;
+
+			}
+		}
+		solve_c_svc(prob,param,alpha,&si,Cp,Cn);
+	} else {
+		switch(param->svm_type)
+		{
+			case C_SVC:
+				solve_c_svc(prob,param,alpha,&si,Cp,Cn);
+				//solve_c_svc_dcsvm(prob, param, alpha, &si, Cp, Cn);
+				break;
+			case NU_SVC:
+				solve_nu_svc(prob,param,alpha,&si);
+				break;
+			case ONE_CLASS:
+				solve_one_class(prob,param,alpha,&si);
+				break;
+			case EPSILON_SVR:
+				solve_epsilon_svr(prob,param,alpha,&si);
+				break;
+			case NU_SVR:
+				solve_nu_svr(prob,param,alpha,&si);
+				break;
+		}
 	}
 
 	info("obj = %f, rho = %f\n",si.obj,si.rho);
@@ -2920,7 +2932,8 @@ static void gtsvm_predict_bulk(const svm_model *model, svm_problem *prob)
 				gparam.gamma,
 				gparam.coef0,
 				gparam.degree,
-				true,  // biased
+				//true,  // biased
+				false,
 				false,  // smallClusters
 				64  // activeClusters
 			));
@@ -3682,6 +3695,14 @@ void knkmeans(double **K, const int *indices, const int msize, const int ncluste
 void knkmeans_predict_alllevel(const svm_parameter *param, const svm_problem *prob, int **sub_cidx, int **sub_csize,
 	int msize, double **cluster_avg, const int lvl, const int nchild, int **full_cidx, int **full_csize)
 {
+
+
+	for (int i = 1; i < lvl; i++) {
+		for (int j = 0 ; j < 4 ; j++) {
+			info("%d ", sub_csize[i][j]);
+		}
+		info("\n");
+	}
 	double *Ki = Malloc(double, prob->l);
 	int **label = Malloc(int*, lvl);
 	for (int i = 0; i < lvl; i++)
@@ -3713,7 +3734,9 @@ void knkmeans_predict_alllevel(const svm_parameter *param, const svm_problem *pr
 					mn = cluster_avg[l][j] - 2*dist;
 					label[l][i] = j;
 				}
+				//info("%f ", cluster_avg[l][j] - 2*dist);
 			}
+			//info("%d ", label[l][i]);
 		}
 	}
 
@@ -3745,7 +3768,7 @@ void knkmeans_predict_alllevel(const svm_parameter *param, const svm_problem *pr
 
 void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int **full_cidx, int **full_csize)
 {
-	int lvl = 5, nchild = 4, max_iter = 10;
+	int lvl = 2, nchild = 4, max_iter = 10;
 	int msize = std::min(prob->l, 2000);
 	int *perms = Malloc(int, prob->l);
 	svm_node *sample[2000];
@@ -3762,7 +3785,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int *
 		Ksample[i] = Malloc(double, msize);
 		for (int j = 0; j < msize; j++) {
 			Ksample[i][j] = Kernel::k_function(sample[i], sample[j], *param);
-        }
+		}
 	}
 
 	int **sub_cidx = Malloc(int*, lvl);
@@ -3774,7 +3797,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int *
 		sub_csize[i] = Malloc(int, kk);
 	}
 
-    std::cerr << "start sample kmeans\n";
+	std::cerr << "start sample kmeans\n";
 	double **cluster_avg = Malloc(double*, lvl);
 
 	for (int i = 0; i < msize; i++)
@@ -3794,9 +3817,11 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int *
 		}
 	}
 
-	for (int i = 1; i < lvl; i++)
+
+	for (int i = 0; i < lvl; i++)
 		for (int j = 0; j < msize; j++)
 			sub_cidx[i][j] = perms[sub_cidx[i][j]];
+
 
 	knkmeans_predict_alllevel(param, prob, sub_cidx, sub_csize, msize, cluster_avg, lvl, nchild, full_cidx, full_csize);
 
