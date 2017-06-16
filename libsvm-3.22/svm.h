@@ -102,7 +102,7 @@ void knkmeans(double **K, const int *indices, const int msize, const int offset,
 		double *cluster_avg, int *cluster, int *csize);
 void knkmeans_predict_alllevel(const svm_parameter *param, const svm_problem *prob, int **sub_cidx, int **sub_csize,
 	int msize, double **cluster_avg, const int lvl, const int nchild, int **full_cidx, int **full_csize);
-void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int **full_cidx, int **full_csize);
+void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const int lvl, const int nchild, int **full_cidx, int **full_csize);
 
 #ifdef __cplusplus
 }

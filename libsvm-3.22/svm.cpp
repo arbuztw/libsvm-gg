@@ -1821,7 +1821,7 @@ static decision_function svm_train_one(
 			full_csize[i] = Malloc(int, ncluster);
 		}
 
-		leveled_knkmeans(param, prob, full_cidx, full_csize);
+		leveled_knkmeans(param, prob, eze, nchild, full_cidx, full_csize);
 		std::cerr << "end leveled kmeans\n";
 
 		for(int ll = 1 ; ll < 2 ; ll++){
@@ -3641,7 +3641,9 @@ void knkmeans(double **K, const int *indices, const int msize, const int ncluste
 		for (int i = 0; i < ncluster; i++) {
 			current[i] = sum;
 			sum += csize[i];
+			info("%d ", csize[i]);
 		}
+		info("\n");
 		for (int i = 0; i < msize; i++) {
 			int &idx = current[label[i]];
 			cluster[idx] = indices[i];
@@ -3722,6 +3724,7 @@ void knkmeans_predict_alllevel(const svm_parameter *param, const svm_problem *pr
 			double mn = INF;
 			label[l][i] = 0;
 			for (int j = 0; j < ncluster; j++) {
+				if (sub_csize[l][j] == 0) continue;
 				double dist = 0;
 				int next_start = start + sub_csize[l][j];
 				for (; start < next_start; start++) {
@@ -3766,9 +3769,9 @@ void knkmeans_predict_alllevel(const svm_parameter *param, const svm_problem *pr
 	free(cur_start);
 }
 
-void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int **full_cidx, int **full_csize)
+void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const int lvl, const int nchild, int **full_cidx, int **full_csize)
 {
-	int lvl = 2, nchild = 4, max_iter = 10;
+	int max_iter = 10;
 	int msize = std::min(prob->l, 2000);
 	int *perms = Malloc(int, prob->l);
 	svm_node *sample[2000];
@@ -3795,6 +3798,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int *
 		sub_cidx[i] = Malloc(int, msize);
 		int kk = (int)pow(nchild, i);
 		sub_csize[i] = Malloc(int, kk);
+		memset(sub_csize[i], 0, sizeof(int)*kk);
 	}
 
 	std::cerr << "start sample kmeans\n";
@@ -3803,6 +3807,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, int *
 	for (int i = 0; i < msize; i++)
 		sub_cidx[0][i] = i;
 	sub_csize[0][0] = msize;
+
 
 	for (int i = 1; i < lvl; i++) {
 		int cid = 0;
