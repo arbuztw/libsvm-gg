@@ -9,6 +9,8 @@
 #include <locale.h>
 #include <algorithm>
 #include <iostream>
+#include <vector>
+#include <gtsvm.h>
 #include "svm.h"
 int libsvm_version = LIBSVM_VERSION;
 typedef float Qfloat;
@@ -1436,6 +1438,141 @@ private:
 	double *QD;
 };
 
+struct gtsvm_parameter
+{
+	GTSVM_Kernel kernel;
+	float gamma, coef0, degree;
+};
+
+static void gtsvm_kernel_params(
+	const svm_parameter *param, gtsvm_parameter &gparam)
+{
+	gparam.gamma = static_cast<float>(param->gamma);
+	gparam.coef0 = static_cast<float>(param->coef0);
+	gparam.degree = static_cast<float>(param->degree);
+
+	switch (param->kernel_type)
+	{
+		case LINEAR:
+			gparam.gamma = 1;
+			gparam.coef0 = 0;
+			gparam.degree = 1;
+			// Fall through
+		case POLY:
+			gparam.kernel = GTSVM_KERNEL_POLYNOMIAL;
+			break;
+		case RBF:
+			gparam.kernel = GTSVM_KERNEL_GAUSSIAN;
+			break;
+		case SIGMOID:
+			gparam.kernel = GTSVM_KERNEL_SIGMOID;
+			break;
+		default:
+			fprintf(stderr, "ERROR: unexpected kernel_type %d\n", param->kernel_type);
+			exit(1);
+	}
+}
+
+#define GTSVM_CHECK(is_error) \
+	if (is_error) { fprintf(stderr, "GTSVM Error: %s\n", GTSVM_Error()); exit(1); }
+
+static void gtsvm_solve_c_svc(
+	const svm_problem *prob, const svm_parameter* param,
+	double *alpha, Solver::SolutionInfo* si, double Cp, double Cn)
+{
+	gtsvm_parameter gparam;
+	gtsvm_kernel_params(param, gparam);
+
+	// Convert svm_problem to GTSVM input
+	int columns = 0;
+	std::vector<int32_t> labels;
+	std::vector<float> values;
+	std::vector<size_t> indices;
+	std::vector<size_t> offsets;
+
+	offsets.push_back(0);
+
+	for (int i = 0; i < prob->l; i++)
+	{
+		int label = static_cast<int>(prob->y[i]);
+		labels.push_back(label);
+
+		for (svm_node *x = prob->x[i]; x->index != -1; x++) {
+			indices.push_back(x->index);
+			values.push_back(static_cast<float>(x->value));
+			if (x->index + 1 > columns)
+				columns = x->index + 1;
+		}
+
+		offsets.push_back(values.size());
+	}
+
+	GTSVM_Context context;
+
+	GTSVM_CHECK(GTSVM_Create(&context));
+
+	GTSVM_CHECK(GTSVM_InitializeSparse(
+		context,
+		&values[0],
+		&indices[0],
+		&offsets[0],
+		GTSVM_TYPE_FLOAT,
+		&labels[0],
+		GTSVM_TYPE_INT32,
+		prob->l,
+		columns,
+		false,  // columnMajor
+		false,  // multiclass
+		static_cast<float>(param->C),
+		gparam.kernel,
+		gparam.gamma,
+		gparam.coef0,
+		gparam.degree,
+		true,  // biased
+		false,  // smallClusters
+		64  // activeClusters
+	));
+
+	int iter = 0;
+	int const max_iter = max(10000000, prob->l > INT_MAX / 100 ? INT_MAX : 100 * prob->l);
+	int const repetitions = 256;    // must be a multiple of 16
+	int counter = min(prob->l, 1000) + 1;
+
+	double primal = INF, dual = -INF;
+
+	for (; iter < max_iter; iter += repetitions) {
+		counter -= repetitions;
+		while (counter <= 0)
+		{
+			counter += min(prob->l, 1000);
+			info(".");
+		}
+
+		GTSVM_CHECK(GTSVM_Optimize(context, &primal, &dual, repetitions));
+
+		if (2 * (primal - dual) < param->eps * (primal + dual))
+			break;
+	}
+
+	if (iter >= max_iter)
+		fprintf(stderr, "\nWARNING: reaching max number of iterations\n");
+
+	info("\noptimization finished, #iter = %d\n",iter);
+
+	// Fetch and convert result from GTSVM model
+	GTSVM_CHECK(GTSVM_GetAlphas(context, alpha, GTSVM_TYPE_DOUBLE, false));
+	for (int i = 0; i < prob->l; i++)
+		alpha[i] *= prob->y[i];
+
+	si->obj = -dual;
+	GTSVM_CHECK(GTSVM_GetBias(context, &si->rho));
+	si->rho = -si->rho;
+	si->upper_bound_p = Cp;
+	si->upper_bound_n = Cn;
+
+	GTSVM_CHECK(GTSVM_Destroy(context));
+}
+
 //
 // construct and solve various formulations
 //
@@ -1495,6 +1632,13 @@ static void solve_c_svc(
 	const svm_problem *prob, const svm_parameter* param,
 	double *alpha, Solver::SolutionInfo* si, double Cp, double Cn)
 {
+	if (!(Cp == param->C && Cn == param->C))
+		fprintf(stderr, "WARNING: weighted C not supported, disabling GTSVM\n");
+	else if (param->kernel_type == PRECOMPUTED)
+		fprintf(stderr, "WARNING: precomputed kernel not supported, disabling GTSVM\n");
+	else
+		return gtsvm_solve_c_svc(prob, param, alpha, si, Cp, Cn);
+
 	int l = prob->l;
 	double *minus_ones = new double[l];
 	schar *y = new schar[l];
@@ -2519,8 +2663,23 @@ void svm_cross_validation(const svm_problem *prob, const svm_parameter *param, i
 			free(prob_estimates);
 		}
 		else
-			for(j=begin;j<end;j++)
-				target[perm[j]] = svm_predict(submodel,prob->x[perm[j]]);
+		{
+			struct svm_problem testprob;
+			testprob.l = end - begin;
+			testprob.x = Malloc(struct svm_node *, testprob.l);
+			testprob.y = Malloc(double, testprob.l);
+
+			for (j = begin; j < end; j++)
+				testprob.x[j - begin] = prob->x[perm[j]];
+
+			svm_predict_bulk(submodel, &testprob);
+
+			for (j = begin; j < end; j++)
+				target[perm[j]] = testprob.y[j - begin];
+
+			free(testprob.x);
+			free(testprob.y);
+		}
 		svm_free_and_destroy_model(&submodel);
 		free(subprob.x);
 		free(subprob.y);
@@ -2660,6 +2819,203 @@ double svm_predict(const svm_model *model, const svm_node *x)
 	double pred_result = svm_predict_values(model, x, dec_values);
 	free(dec_values);
 	return pred_result;
+}
+
+static void gtsvm_predict_bulk(const svm_model *model, svm_problem *prob)
+{
+	int columns = 0;
+	for (int i = 0; i < model->l; i++)
+	{
+		for (svm_node *x = model->SV[i]; x->index != -1; x++)
+			if (x->index + 1 > columns)
+				columns = x->index + 1;
+	}
+	for (int i = 0; i < prob->l; i++)
+	{
+		for (svm_node *x = prob->x[i]; x->index != -1; x++)
+			if (x->index + 1 > columns)
+				columns = x->index + 1;
+	}
+
+	int nr_class = model->nr_class;
+	int nr_classifier = nr_class * (nr_class - 1) / 2;
+
+	// Rebuild GTSVM model from svm_model
+	auto contexts = new GTSVM_Context[nr_classifier];
+
+	gtsvm_parameter gparam;
+	gtsvm_kernel_params(&model->param, gparam);
+
+	int *start = new int[nr_class];
+	start[0] = 0;
+	for (int i = 1; i < nr_class; i++)
+		start[i] = start[i - 1] + model->nSV[i - 1];
+
+	int p = 0;
+	for (int i = 0; i < nr_class; i++)
+	{
+		for (int j = i + 1; j < nr_class; j++)
+		{
+			int si = start[i], sj = start[j];
+			int ci = model->nSV[i], cj = model->nSV[j];
+			double *coef1 = model->sv_coef[j - 1];
+			double *coef2 = model->sv_coef[i];
+
+			std::vector<int32_t> labels;
+			std::vector<float> values;
+			std::vector<size_t> indices;
+			std::vector<size_t> offsets;
+			std::vector<float> alphas;
+
+			offsets.push_back(0);
+
+			for (int k = 0; k < ci; k++)
+			{
+				int idx = si + k;
+				if (coef1[idx] == 0)
+					continue;
+
+				labels.push_back(1);
+				for (svm_node *x = model->SV[idx]; x->index != -1; x++)
+				{
+					indices.push_back(x->index);
+					values.push_back(static_cast<float>(x->value));
+				}
+				offsets.push_back(values.size());
+				alphas.push_back(static_cast<float>(coef1[idx]));
+			}
+
+			for (int k = 0; k < cj; k++)
+			{
+				int idx = sj + k;
+				if (coef2[idx] == 0)
+					continue;
+
+				labels.push_back(-1);
+				for (svm_node *x = model->SV[idx]; x->index != -1; x++)
+				{
+					indices.push_back(x->index);
+					values.push_back(static_cast<float>(x->value));
+				}
+				offsets.push_back(values.size());
+				alphas.push_back(static_cast<float>(-coef2[idx]));
+			}
+
+			GTSVM_CHECK(GTSVM_Create(&contexts[p]));
+
+			GTSVM_CHECK(GTSVM_InitializeSparse(
+				contexts[p],
+				&values[0],
+				&indices[0],
+				&offsets[0],
+				GTSVM_TYPE_FLOAT,
+				&labels[0],
+				GTSVM_TYPE_INT32,
+				static_cast<unsigned int>(labels.size()),
+				columns,
+				false,  // columnMajor
+				false,  // multiclass
+				1,  // regularization
+				gparam.kernel,
+				gparam.gamma,
+				gparam.coef0,
+				gparam.degree,
+				true,  // biased
+				false,  // smallClusters
+				64  // activeClusters
+			));
+
+			GTSVM_CHECK(GTSVM_SetAlphas(
+				contexts[p],
+				&alphas[0],
+				GTSVM_TYPE_FLOAT,
+				false
+			));
+
+			p++;
+		}
+	}
+
+	delete [] start;
+
+	// Convert svm_problem to GTSVM input
+	std::vector<float> values;
+	std::vector<size_t> indices;
+	std::vector<size_t> offsets;
+
+	offsets.push_back(0);
+
+	for (int i = 0; i < prob->l; i++)
+	{
+		for (svm_node *x = prob->x[i]; x->index != -1; x++)
+		{
+			indices.push_back(x->index);
+			values.push_back(static_cast<float>(x->value));
+		}
+		offsets.push_back(values.size());
+	}
+
+	int **vote = new int*[prob->l];
+	for (int i = 0; i < prob->l; i++)
+	{
+		vote[i] = new int[nr_class];
+		memset(vote[i], 0, nr_class * sizeof(int));
+	}
+
+	double *predict_labels = new double[prob->l];
+
+	p = 0;
+	for (int i = 0; i < nr_class; i++)
+	{
+		for (int j = i + 1; j < nr_class; j++)
+		{
+			GTSVM_CHECK(GTSVM_ClassifySparse(
+				contexts[p],
+				predict_labels,
+				GTSVM_TYPE_DOUBLE,
+				&values[0],
+				&indices[0],
+				&offsets[0],
+				GTSVM_TYPE_FLOAT,
+				prob->l,
+				columns,
+				false  // columnMajor
+			));
+
+			for (int k = 0; k < prob->l; k++)
+				vote[k][predict_labels[k] > 0 ? i : j]++;
+
+			p++;
+		}
+	}
+
+	delete [] predict_labels;
+
+	for (int i = 0; i < nr_classifier; i++)
+		GTSVM_CHECK(GTSVM_Destroy(contexts[i]));
+	delete [] contexts;
+
+	for (int i = 0; i < prob->l; i++)
+	{
+		int vote_max_idx = 0;
+		for (int j = 1; j < nr_class; j++)
+			if (vote[i][j] > vote[i][vote_max_idx])
+				vote_max_idx = j;
+		prob->y[i] = model->label[vote_max_idx];
+		delete [] vote[i];
+	}
+	delete [] vote;
+}
+
+void svm_predict_bulk(const svm_model *model, svm_problem *prob)
+{
+	if (model->param.svm_type == C_SVC &&
+		model->param.kernel_type != PRECOMPUTED)
+		return gtsvm_predict_bulk(model, prob);
+
+	fprintf(stderr, "WARNING: model not supported, disabling GTSVM for prediction\n");
+	for (int i = 0; i < prob->l; i++)
+		prob->y[i] = svm_predict(model, prob->x[i]);
 }
 
 double svm_predict_probability(
