@@ -1812,7 +1812,7 @@ static decision_function svm_train_one(
 	memset(alpha, 0, sizeof(double)*prob->l);
 	Solver::SolutionInfo si;
 	if(param->svm_type == C_SVC){
-		int eze = 5, nchild = 4;
+		int eze = 3, nchild = 4;
 		int **full_cidx = Malloc(int*, eze);
 		int **full_csize = Malloc(int*, eze);
 		for(int i = 0 ; i < eze ; i++) {
@@ -1824,7 +1824,7 @@ static decision_function svm_train_one(
 		leveled_knkmeans(param, prob, eze, nchild, full_cidx, full_csize);
 		std::cerr << "end leveled kmeans\n";
 
-		for(int ll = 1 ; ll < 2 ; ll++){
+		for(int ll = 1 ; ll < eze ; ll++){
 			int nll = (int)pow(nchild, ll);
 			for(int i = 0 ; i < nll ; i++){
 				info("%d ", full_csize[ll][i]);
@@ -1837,7 +1837,6 @@ static decision_function svm_train_one(
 			info("\n");
 		*/
 		}
-
 
 		// one-time allocating for each sub-problem
 		double *sub_alpha = Malloc(double,prob->l);
@@ -1876,6 +1875,7 @@ static decision_function svm_train_one(
 
 			}
 		}
+		info("csize %d\n", prob->l);
 		solve_c_svc(prob,param,alpha,&si,Cp,Cn);
 	} else {
 		switch(param->svm_type)
@@ -3642,9 +3642,9 @@ void knkmeans(double **K, const int *indices, const int msize, const int ncluste
 		for (int i = 0; i < ncluster; i++) {
 			current[i] = sum;
 			sum += csize[i];
-			info("%d ", csize[i]);
+			//info("%d ", csize[i]);
 		}
-		info("\n");
+		//info("\n");
 		for (int i = 0; i < msize; i++) {
 			int &idx = current[label[i]];
 			cluster[idx] = indices[i];
@@ -3695,100 +3695,12 @@ void knkmeans(double **K, const int *indices, const int msize, const int ncluste
 	//free(cluster_avg);
 }
 
-void knkmeans_predict_alllevel(const svm_parameter *param, const svm_problem *prob,
-	int **sub_cidx, int **sub_csize, int msize, double **cluster_avg, int **same_cluster_map,
-	const int lvl, const int nchild, int **full_cidx, int **full_csize)
-{
-
-
-	for (int i = 1; i < lvl; i++) {
-		for (int j = 0 ; j < (int)pow(nchild,i) ; j++) {
-			info("%d ", sub_csize[i][j]);
-		}
-		info("\n");
-	}
-	double *Ki = Malloc(double, prob->l);
-	int **label = Malloc(int*, lvl);
-	for (int i = 0; i < lvl; i++)
-		label[i] = Malloc(int, prob->l);
-
-	for (int i = 0; i < prob->l; i++)
-		full_cidx[0][i] = i;
-	full_csize[0][0] = prob->l;
-
-	for (int i = 0; i < prob->l; i++) {
-		for (int j = 0; j < msize; j++) {
- 			Ki[sub_cidx[0][j]] = Kernel::k_function(prob->x[i], prob->x[sub_cidx[0][j]], *param);
-		}
-		for (int l = 1; l < lvl; l++) {
-			int ncluster = (int)pow(nchild, l);
-			int start = 0;
-			double mn = INF;
-			label[l][i] = 0;
-			for (int j = 0; j < ncluster; j++) {
-				if (sub_csize[l][j] == 0) continue;
-				double dist = 0;
-				int next_start = start + sub_csize[l][j];
-				for (; start < next_start; start++) {
-					int idx_k = sub_cidx[l][start];
-					dist += Ki[idx_k];
-				}
-				dist /= sub_csize[l][j];
-
-				if (cluster_avg[l][j] - 2*dist < mn) {
-					mn = cluster_avg[l][j] - 2*dist;
-					label[l][i] = j;
-				}
-				//info("%f ", cluster_avg[l][j] - 2*dist);
-			}
-			//info("%d ", label[l][i]);
-		}
-	}
-
-	for (int l = 2; l < lvl; l++) {
-		for (int i = 0; i < prob->l; i++) {
-			const int cid = same_cluster_map[l-1][label[l-1][i]];
-			if (cid > 0) {
-				label[l-1][i] = -1;
-				label[l][i] = cid;
-			}
-		}
-	}
-
-	int *cur_start = Malloc(int, (int)pow(nchild, lvl-1));
-	for (int l = 1; l < lvl; l++) {
-		int ncluster = (int)pow(nchild, l);
-		for (int i = 0; i < ncluster; i++)
-			full_csize[l][i] = 0;
-		for (int i = 0; i < prob->l; i++) {
-			if (label[l][i] < 0) continue;
-			full_csize[l][label[l][i]]++;
-		}
-		int sum = 0;
-		for (int i = 0; i < ncluster; i++) {
-			cur_start[i] = sum;
-			sum += full_csize[l][i];
-		}
-		for (int i = 0; i < prob->l; i++) {
-			if (label[l][i] < 0) continue;
-			int &idx = cur_start[label[l][i]];
-			full_cidx[l][idx] = i;
-			idx++;
-		}
-	}
-
-	for (int i = 0; i < lvl; i++) free(label[i]);
-	free(label);
-	free(Ki);
-	free(cur_start);
-}
-
 void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const int lvl, const int nchild, int **full_cidx, int **full_csize)
 {
 	int max_iter = 10;
 	int msize = std::min(prob->l, 2000);
 	int *perms = Malloc(int, prob->l);
-	svm_node *sample[2000];
+	svm_node **sample = Malloc(svm_node*, 2000);
 
 	for (int i = 0; i < prob->l; i++)
 		perms[i] = i;
@@ -3796,6 +3708,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const
 
 	for (int i = 0; i < msize; i++)
 		sample[i] = prob->x[perms[i]];
+	free(perms);
 
 	double **Ksample = Malloc(double*, msize);
 	for (int i = 0; i < msize; i++) {
@@ -3818,7 +3731,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const
 		memset(same_cluster_map[i], -1, sizeof(int)*kk);
 	}
 
-	std::cerr << "start sample kmeans\n";
+	printf("start sample kmeans\n");
 	double **cluster_avg = Malloc(double*, lvl);
 
 	for (int i = 0; i < msize; i++)
@@ -3851,15 +3764,9 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const
 		}
 	}
 
+	knkmeans_predict_alllevel(param, prob, sample, sub_cidx, sub_csize, msize, cluster_avg, same_cluster_map, lvl, nchild, full_cidx, full_csize);
 
-	for (int i = 0; i < lvl; i++)
-		for (int j = 0; j < msize; j++)
-			sub_cidx[i][j] = perms[sub_cidx[i][j]];
-
-
-	knkmeans_predict_alllevel(param, prob, sub_cidx, sub_csize, msize, cluster_avg, same_cluster_map, lvl, nchild, full_cidx, full_csize);
-
-	free(perms);
+	free(sample);
 
 	for (int i = 0; i < msize; i++) free(Ksample[i]);
 	free(Ksample);
