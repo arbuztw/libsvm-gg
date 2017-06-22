@@ -1812,7 +1812,7 @@ static decision_function svm_train_one(
 	memset(alpha, 0, sizeof(double)*prob->l);
 	Solver::SolutionInfo si;
 	if(param->svm_type == C_SVC){
-		int eze = 3, nchild = 4;
+		int eze = 1, nchild = 4;
 		int **full_cidx = Malloc(int*, eze);
 		int **full_csize = Malloc(int*, eze);
 		for(int i = 0 ; i < eze ; i++) {
@@ -3738,7 +3738,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const
 		sub_cidx[0][i] = i;
 	sub_csize[0][0] = msize;
 
-	int mincluster = (int)ceil(msize / pow(nchild, lvl-1) * 5);
+	int mincluster = (int)ceil(msize / pow(nchild, lvl) * 5);
 
 	for (int i = 1; i < lvl; i++) {
 		int cid = 0;
