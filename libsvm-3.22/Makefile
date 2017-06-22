@@ -1,6 +1,6 @@
 CXX ?= g++
 NVCC ?= nvcc
-CFLAGS = -Wall -Wconversion -fPIC -g
+CFLAGS = -Wall -Wconversion -fPIC -O3
 SHVER = 2
 OS = $(shell uname)
 
