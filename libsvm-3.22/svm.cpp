@@ -1805,9 +1805,9 @@ static void solve_c_svc(
 
 	for(i=0;i<l;i++)
 	{
-		alpha[i] = 0;
 		minus_ones[i] = -1;
 		if(prob->y[i] > 0) y[i] = +1; else y[i] = -1;
+		alpha[i] *= y[i];
 	}
 
 	Solver s;
