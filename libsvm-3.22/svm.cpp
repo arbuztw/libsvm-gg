@@ -3896,6 +3896,7 @@ void knkmeans(double **K, const int *indices, const int msize, const int ncluste
 
 void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const int lvl, const int nchild, int **full_cidx, int **full_csize)
 {
+	if (lvl <= 1) return ;
 	int max_iter = 10;
 	int msize = std::min(prob->l, 2000);
 	int *perms = Malloc(int, prob->l);
