@@ -38,6 +38,7 @@ void exit_with_help()
 	"-wi weight : set the parameter C of class i to weight*C, for C-SVC (default 1)\n"
 	"-v n: n-fold cross validation mode\n"
 	"-q : quiet mode (no outputs)\n"
+	"-eze : set eze\n"
 	);
 	exit(1);
 }
@@ -179,6 +180,7 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 	param.nr_weight = 0;
 	param.weight_label = NULL;
 	param.weight = NULL;
+	param.eze = 1;
 	cross_validation = 0;
 
 	// parse options
@@ -214,7 +216,10 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 				param.C = atof(argv[i]);
 				break;
 			case 'e':
-				param.eps = atof(argv[i]);
+				if (strlen(argv[i-1]) == 4 && !strcmp(argv[i-1], "-eze"))
+					param.eze = atoi(argv[i]);
+				else
+					param.eps = atof(argv[i]);
 				break;
 			case 'p':
 				param.p = atof(argv[i]);

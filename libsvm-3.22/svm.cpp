@@ -2008,7 +2008,7 @@ static decision_function svm_train_one(
 	memset(alpha, 0, sizeof(double)*prob->l);
 	Solver::SolutionInfo si;
 	if(param->svm_type == C_SVC){
-		int eze = 1, nchild = 4;
+		int eze = param->eze, nchild = 4;
 		int **full_cidx = Malloc(int*, eze);
 		int **full_csize = Malloc(int*, eze);
 		for(int i = 0 ; i < eze ; i++) {
@@ -3745,6 +3745,9 @@ const char *svm_check_parameter(const svm_problem *prob, const svm_parameter *pa
 	if(param->probability == 1 &&
 	   svm_type == ONE_CLASS)
 		return "one-class SVM probability output not supported yet";
+
+	if (param->eze < 0 || param->eze > 5)
+		return "not 1 <= eze <= 5";
 
 
 	// check whether nu-svc is feasible
