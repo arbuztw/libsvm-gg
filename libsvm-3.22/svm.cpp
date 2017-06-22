@@ -2043,6 +2043,11 @@ static decision_function svm_train_one(
 		sub_prob.x = Malloc(svm_node *,sub_prob.l);
 		sub_prob.y = Malloc(double,sub_prob.l);
 
+		// loose stop condition for sub-problems
+		svm_parameter sub_param;
+		memcpy(&sub_param, param, sizeof(svm_parameter));
+		sub_param.eps *= 10;
+
 		for(int ll = eze-1 ; ll >= 1 ; ll--) {
 			int ncluster = (int)pow(nchild, ll);
 			int start = 0;
@@ -2059,7 +2064,7 @@ static decision_function svm_train_one(
 				sub_prob.l = csize;
 				info("csize %d\n", csize);
 
-				solve_c_svc(&sub_prob,param,sub_alpha,&subsi,Cp,Cn);
+				solve_c_svc(&sub_prob,&sub_param,sub_alpha,&subsi,Cp,Cn);
 
 				if(subsi.rho != 0) {
 					info("rho should be 0\n");
