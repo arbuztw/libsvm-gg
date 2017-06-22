@@ -1790,12 +1790,14 @@ static void solve_c_svc(
 	const svm_problem *prob, const svm_parameter* param,
 	double *alpha, Solver::SolutionInfo* si, double Cp, double Cn)
 {
-	if (!(Cp == param->C && Cn == param->C))
-		fprintf(stderr, "WARNING: weighted C not supported, disabling GTSVM\n");
-	else if (param->kernel_type == PRECOMPUTED)
-		fprintf(stderr, "WARNING: precomputed kernel not supported, disabling GTSVM\n");
-	else
-		return gtsvm_solve_c_svc(prob, param, alpha, si, Cp, Cn);
+	if (param->use_gtsvm) {
+		if (!(Cp == param->C && Cn == param->C))
+			fprintf(stderr, "WARNING: weighted C not supported, disabling GTSVM\n");
+		else if (param->kernel_type == PRECOMPUTED)
+			fprintf(stderr, "WARNING: precomputed kernel not supported, disabling GTSVM\n");
+		else
+			return gtsvm_solve_c_svc(prob, param, alpha, si, Cp, Cn);
+	}
 
 	int l = prob->l;
 	double *minus_ones = new double[l];

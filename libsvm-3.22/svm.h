@@ -45,6 +45,7 @@ struct svm_parameter
 	int shrinking;	/* use the shrinking heuristics */
 	int probability; /* do probability estimates */
 	int eze;
+	int use_gtsvm;
 };
 
 //

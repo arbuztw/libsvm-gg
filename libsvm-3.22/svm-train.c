@@ -39,6 +39,7 @@ void exit_with_help()
 	"-v n: n-fold cross validation mode\n"
 	"-q : quiet mode (no outputs)\n"
 	"-eze : set eze\n"
+	"-G : use GTSVM\n"
 	);
 	exit(1);
 }
@@ -181,6 +182,7 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 	param.weight_label = NULL;
 	param.weight = NULL;
 	param.eze = 1;
+	param.use_gtsvm = 0;
 	cross_validation = 0;
 
 	// parse options
@@ -229,6 +231,10 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 				break;
 			case 'b':
 				param.probability = atoi(argv[i]);
+				break;
+			case 'G':
+				param.use_gtsvm = 1;
+				i--;
 				break;
 			case 'q':
 				print_func = &print_null;
