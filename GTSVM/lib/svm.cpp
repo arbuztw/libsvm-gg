@@ -1898,9 +1898,6 @@ std::pair< CUDA_FLOAT_DOUBLE, CUDA_FLOAT_DOUBLE > const SVM::Optimize( unsigned 
 
 	m_updatedResponses = false;
 
-	if ( ! progress )
-		throw std::runtime_error( "An iteration made no progress" );
-
 	return std::pair< CUDA_FLOAT_DOUBLE, CUDA_FLOAT_DOUBLE >( primal, dual );
 }
 
