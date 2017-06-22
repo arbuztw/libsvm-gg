@@ -400,6 +400,7 @@ public:
 	virtual ~Solver() {};
 
 	struct SolutionInfo {
+		double initial_time;
 		double obj;
 		double rho;
 		double upper_bound_p;
@@ -445,10 +446,13 @@ protected:
 	void swap_index(int i, int j);
 	void reconstruct_gradient();
 	virtual int select_working_set(int &i, int &j);
+	virtual int select_working_set(int &i);
 	virtual double calculate_rho();
 	virtual void do_shrinking();
+	virtual void do_shrinking_nobias();
 private:
 	bool be_shrunk(int i, double Gmax1, double Gmax2);
+	bool be_shrunk_nobias(int i, double Gmax1);
 };
 
 void Solver::swap_index(int i, int j)
@@ -505,6 +509,8 @@ void Solver::reconstruct_gradient()
 	}
 }
 
+// Modify here
+
 void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 		   double *alpha_, double Cp, double Cn, double eps,
 		   SolutionInfo* si, int shrinking)
@@ -519,6 +525,8 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 	this->Cn = Cn;
 	this->eps = eps;
 	unshrink = false;
+
+	double inittime = clock();
 
 	// initialize alpha_status
 	{
@@ -559,12 +567,24 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 			}
 	}
 
+	{
+		double v = 0;
+		int ii;
+		for(ii=0;ii<l;ii++)
+			v += alpha[ii] * (G[ii] + p[ii]);
+
+		si->obj = v/2;
+	}
+
+
+	si->initial_time = (clock()-inittime)/CLOCKS_PER_SEC;
 	// optimization step
 
 	int iter = 0;
 	int max_iter = max(10000000, l>INT_MAX/100 ? INT_MAX : 100*l);
 	int counter = min(l,1000)+1;
-	
+
+//	max_iter = 20000;
 	while(iter < max_iter)
 	{
 		// show progress and do shrinking
@@ -572,37 +592,49 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 		if(--counter == 0)
 		{
 			counter = min(l,1000);
-			if(shrinking) do_shrinking();
+			if(shrinking) do_shrinking_nobias();
 			info(".");
 		}
 
 		int i,j;
-		if(select_working_set(i,j)!=0)
+		if(select_working_set(i)!=0)
 		{
 			// reconstruct the whole gradient
 			reconstruct_gradient();
+
 			// reset active set size and check
 			active_size = l;
 			info("*");
-			if(select_working_set(i,j)!=0)
+			if(select_working_set(i)!=0)
 				break;
 			else
 				counter = 1;	// do shrinking next iteration
 		}
-		
+
 		++iter;
 
 		// update alpha[i] and alpha[j], handle bounds carefully
-		
+
 		const Qfloat *Q_i = Q.get_Q(i,active_size);
-		const Qfloat *Q_j = Q.get_Q(j,active_size);
+//		const Qfloat *Q_j = Q.get_Q(j,active_size);
 
 		double C_i = get_C(i);
-		double C_j = get_C(j);
+//		double C_j = get_C(j);
 
 		double old_alpha_i = alpha[i];
-		double old_alpha_j = alpha[j];
+//		double old_alpha_j = alpha[j];
 
+		double quad_coef = QD[i];
+		if ( quad_coef <= 0)
+			quad_coef = TAU;
+		double delta = -G[i]/quad_coef;
+		alpha[i] += delta;
+		if (alpha[i]<0)
+			alpha[i] = 0;
+		if (alpha[i] > C_i)
+			alpha[i] = C_i;
+
+		/*
 		if(y[i]!=y[j])
 		{
 			double quad_coef = QD[i]+QD[j]+2*Q_i[j];
@@ -612,7 +644,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 			double diff = alpha[i] - alpha[j];
 			alpha[i] += delta;
 			alpha[j] += delta;
-			
+
 			if(diff > 0)
 			{
 				if(alpha[j] < 0)
@@ -689,24 +721,26 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 				}
 			}
 		}
+	*/
 
 		// update G
 
 		double delta_alpha_i = alpha[i] - old_alpha_i;
-		double delta_alpha_j = alpha[j] - old_alpha_j;
-		
+//		double delta_alpha_j = alpha[j] - old_alpha_j;
+
 		for(int k=0;k<active_size;k++)
 		{
-			G[k] += Q_i[k]*delta_alpha_i + Q_j[k]*delta_alpha_j;
+//			G[k] += Q_i[k]*delta_alpha_i + Q_j[k]*delta_alpha_j;
+			G[k] += Q_i[k]*delta_alpha_i;
 		}
 
 		// update alpha_status and G_bar
 
 		{
 			bool ui = is_upper_bound(i);
-			bool uj = is_upper_bound(j);
+//			bool uj = is_upper_bound(j);
 			update_alpha_status(i);
-			update_alpha_status(j);
+//			update_alpha_status(j);
 			int k;
 			if(ui != is_upper_bound(i))
 			{
@@ -718,7 +752,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 					for(k=0;k<l;k++)
 						G_bar[k] += C_i * Q_i[k];
 			}
-
+/*
 			if(uj != is_upper_bound(j))
 			{
 				Q_j = Q.get_Q(j,l);
@@ -728,7 +762,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 				else
 					for(k=0;k<l;k++)
 						G_bar[k] += C_j * Q_j[k];
-			}
+			}*/
 		}
 	}
 
@@ -746,7 +780,8 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 
 	// calculate rho
 
-	si->rho = calculate_rho();
+	si->rho = 0;
+//	si->rho = calculate_rho();
 
 	// calculate objective value
 	{
@@ -754,7 +789,6 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 		int i;
 		for(i=0;i<l;i++)
 			v += alpha[i] * (G[i] + p[i]);
-
 		si->obj = v/2;
 	}
 
@@ -786,6 +820,108 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 	delete[] G_bar;
 }
 
+int Solver::select_working_set(int &out_i)
+{
+	// return i,j such that
+	// i: maximizes -y_i * grad(f)_i, i in I_up(\alpha)
+	// j: minimizes the decrease of obj value
+	//    (if quadratic coefficeint <= 0, replace it with tau)
+	//    -y_j*grad(f)_j < -y_i*grad(f)_i, j in I_low(\alpha)
+
+	double Gmax = -INF;
+	double Gmax2 = -INF;
+	int Gmax_idx = -1;
+	int Gmin_idx = -1;
+	double obj_diff_min = INF;
+
+	int t;
+	for(t=0;t<active_size;t++)
+	{
+		if(!is_upper_bound(t))
+		{
+			if(-G[t] >= Gmax)
+			{
+				Gmax = -G[t];
+				Gmax_idx = t;
+			}
+		}
+		if(!is_lower_bound(t))
+		{
+			if(G[t] >= Gmax)
+			{
+				Gmax = G[t];
+				Gmax_idx = t;
+			}
+		}
+	}
+/*
+	int i = Gmax_idx;
+	const Qfloat *Q_i = NULL;
+	if(i != -1) // NULL Q_i not accessed: Gmax=-INF if i=-1
+		Q_i = Q->get_Q(i,active_size);
+
+	for(int j=0;j<active_size;j++)
+	{
+		if(y[j]==+1)
+		{
+			if (!is_lower_bound(j))
+			{
+				double grad_diff=Gmax+G[j];
+				if (G[j] >= Gmax2)
+					Gmax2 = G[j];
+				if (grad_diff > 0)
+				{
+					double obj_diff;
+					double quad_coef = QD[i]+QD[j]-2.0*y[i]*Q_i[j];
+					if (quad_coef > 0)
+						obj_diff = -(grad_diff*grad_diff)/quad_coef;
+					else
+						obj_diff = -(grad_diff*grad_diff)/TAU;
+
+					if (obj_diff <= obj_diff_min)
+					{
+						Gmin_idx=j;
+						obj_diff_min = obj_diff;
+					}
+				}
+			}
+		}
+		else
+		{
+			if (!is_upper_bound(j))
+			{
+				double grad_diff= Gmax-G[j];
+				if (-G[j] >= Gmax2)
+					Gmax2 = -G[j];
+				if (grad_diff > 0)
+				{
+					double obj_diff;
+					double quad_coef = QD[i]+QD[j]+2.0*y[i]*Q_i[j];
+					if (quad_coef > 0)
+						obj_diff = -(grad_diff*grad_diff)/quad_coef;
+					else
+						obj_diff = -(grad_diff*grad_diff)/TAU;
+
+					if (obj_diff <= obj_diff_min)
+					{
+						Gmin_idx=j;
+						obj_diff_min = obj_diff;
+					}
+				}
+			}
+		}
+	}
+*/
+//	printf("gmax: %lf eps: %lf\n", Gmax, eps);
+	if(Gmax < eps)
+		return 1;
+
+	out_i = Gmax_idx;
+//	out_j = Gmin_idx;
+	return 0;
+}
+
+
 // return 1 if already optimal, return 0 otherwise
 int Solver::select_working_set(int &out_i, int &out_j)
 {
@@ -794,7 +930,7 @@ int Solver::select_working_set(int &out_i, int &out_j)
 	// j: minimizes the decrease of obj value
 	//    (if quadratic coefficeint <= 0, replace it with tau)
 	//    -y_j*grad(f)_j < -y_i*grad(f)_i, j in I_low(\alpha)
-	
+
 	double Gmax = -INF;
 	double Gmax2 = -INF;
 	int Gmax_idx = -1;
@@ -802,7 +938,7 @@ int Solver::select_working_set(int &out_i, int &out_j)
 	double obj_diff_min = INF;
 
 	for(int t=0;t<active_size;t++)
-		if(y[t]==+1)	
+		if(y[t]==+1)
 		{
 			if(!is_upper_bound(t))
 				if(-G[t] >= Gmax)
@@ -878,7 +1014,7 @@ int Solver::select_working_set(int &out_i, int &out_j)
 		}
 	}
 
-	if(Gmax+Gmax2 < eps || Gmin_idx == -1)
+	if(Gmax+Gmax2 < eps)
 		return 1;
 
 	out_i = Gmax_idx;
@@ -899,12 +1035,72 @@ bool Solver::be_shrunk(int i, double Gmax1, double Gmax2)
 	{
 		if(y[i]==+1)
 			return(G[i] > Gmax2);
-		else	
+		else
 			return(G[i] > Gmax1);
 	}
 	else
 		return(false);
 }
+
+bool Solver::be_shrunk_nobias(int i, double Gmax1)
+{
+	if(is_upper_bound(i))
+	{
+			return(-G[i] > Gmax1);
+	}
+	else if(is_lower_bound(i))
+	{
+			return(G[i] > Gmax1);
+	}
+	else
+		return(false);
+}
+
+
+void Solver::do_shrinking_nobias()
+{
+	int i;
+	double Gmax1 = -INF;		// max { -y_i * grad(f)_i | i in I_up(\alpha) }
+
+	// find maximal violating pair first
+	for(i=0;i<active_size;i++)
+	{
+			if(!is_upper_bound(i))
+			{
+				if(-G[i] >= Gmax1)
+					Gmax1 = -G[i];
+			}
+			if(!is_lower_bound(i))
+			{
+				if(G[i] >= Gmax1)
+					Gmax1 = G[i];
+			}
+	}
+
+	if(unshrink == false && Gmax1 <= eps*10)
+	{
+		unshrink = true;
+		reconstruct_gradient();
+		active_size = l;
+		info("*");
+	}
+
+	for(i=0;i<active_size;i++)
+		if (be_shrunk_nobias(i, Gmax1))
+		{
+			active_size--;
+			while (active_size > i)
+			{
+				if (!be_shrunk_nobias(active_size, Gmax1))
+				{
+					swap_index(i,active_size);
+					break;
+				}
+				active_size--;
+			}
+		}
+}
+
 
 void Solver::do_shrinking()
 {
@@ -915,27 +1111,27 @@ void Solver::do_shrinking()
 	// find maximal violating pair first
 	for(i=0;i<active_size;i++)
 	{
-		if(y[i]==+1)	
+		if(y[i]==+1)
 		{
-			if(!is_upper_bound(i))	
+			if(!is_upper_bound(i))
 			{
 				if(-G[i] >= Gmax1)
 					Gmax1 = -G[i];
 			}
-			if(!is_lower_bound(i))	
+			if(!is_lower_bound(i))
 			{
 				if(G[i] >= Gmax2)
 					Gmax2 = G[i];
 			}
 		}
-		else	
+		else
 		{
-			if(!is_upper_bound(i))	
+			if(!is_upper_bound(i))
 			{
 				if(-G[i] >= Gmax2)
 					Gmax2 = -G[i];
 			}
-			if(!is_lower_bound(i))	
+			if(!is_lower_bound(i))
 			{
 				if(G[i] >= Gmax1)
 					Gmax1 = G[i];
@@ -943,7 +1139,7 @@ void Solver::do_shrinking()
 		}
 	}
 
-	if(unshrink == false && Gmax1 + Gmax2 <= eps*10) 
+	if(unshrink == false && Gmax1 + Gmax2 <= eps*10)
 	{
 		unshrink = true;
 		reconstruct_gradient();
