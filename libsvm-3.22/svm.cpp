@@ -3954,7 +3954,7 @@ void leveled_knkmeans(const svm_parameter *param, const svm_problem *prob, const
 		cluster_avg[i] = Malloc(double, kk*nchild);
 		for (int j = 0; j < kk; j++) {
 			if (sub_csize[i-1][j] == 0) continue;
-			if (sub_csize[i-1][j] < mincluster) {
+			if (lvl > 2 && sub_csize[i-1][j] < mincluster) {
 				sub_csize[i][cid] = sub_csize[i-1][j];
 				for (int k = 0; k < sub_csize[i-1][j]; k++) {
 					sub_cidx[i][offset+k] = sub_cidx[i-1][offset+k];
