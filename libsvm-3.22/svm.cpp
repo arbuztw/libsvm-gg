@@ -8,6 +8,7 @@
 #include <limits.h>
 #include <locale.h>
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <vector>
 #include <gtsvm.h>
@@ -61,6 +62,46 @@ static void info(const char *fmt,...)
 #else
 static void info(const char *fmt,...) {}
 #endif
+
+static FILE *report_fp;
+static std::chrono::time_point<std::chrono::system_clock> report_begin;
+static bool report_new;
+
+static void report_set_clock()
+{
+	report_begin = std::chrono::system_clock::now();
+}
+
+static void report_init()
+{
+	char fname[64];
+	snprintf(fname, 64, "/tmp/svm-train-report-%zu.json", time(nullptr));
+	fprintf(stderr, "Saving report to %s\n", fname);
+	report_fp = fopen(fname, "w");
+	fprintf(report_fp, "[\n");
+	report_new = true;
+}
+
+static void report_one(int iter, double obj)
+{
+	if (!report_fp)
+		return;
+	if (report_new)
+		report_new = false;
+	else
+		fprintf(report_fp, ",\n");
+	std::chrono::duration<double> elasped
+		= std::chrono::system_clock::now() - report_begin;
+	fprintf(report_fp, "  {\"time\": %f, \"iter\": %d, \"obj\": %f}",
+		elasped.count(), iter, obj);
+}
+
+static void report_fini()
+{
+	fprintf(report_fp, "\n]\n");
+	fclose(report_fp);
+	report_fp = nullptr;
+}
 
 //
 // Kernel Cache
@@ -448,6 +489,7 @@ protected:
 	virtual int select_working_set(int &i, int &j);
 	virtual int select_working_set(int &i);
 	virtual double calculate_rho();
+	virtual double calculate_obj();
 	virtual void do_shrinking();
 	virtual void do_shrinking_nobias();
 private:
@@ -567,15 +609,8 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 			}
 	}
 
-	{
-		double v = 0;
-		int ii;
-		for(ii=0;ii<l;ii++)
-			v += alpha[ii] * (G[ii] + p[ii]);
-
-		si->obj = v/2;
-	}
-
+	si->obj = calculate_obj();
+	report_one(0, si->obj);
 
 	si->initial_time = (clock()-inittime)/CLOCKS_PER_SEC;
 	// optimization step
@@ -594,6 +629,8 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 			counter = min(l,1000);
 			if(shrinking) do_shrinking_nobias();
 			info(".");
+			si->obj = calculate_obj();
+			report_one(iter, si->obj);
 		}
 
 		int i,j;
@@ -782,15 +819,9 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 
 	si->rho = 0;
 //	si->rho = calculate_rho();
+	si->obj = calculate_obj();
 
-	// calculate objective value
-	{
-		double v = 0;
-		int i;
-		for(i=0;i<l;i++)
-			v += alpha[i] * (G[i] + p[i]);
-		si->obj = v/2;
-	}
+	report_one(iter, si->obj);
 
 	// put back the solution
 	{
@@ -1201,6 +1232,15 @@ double Solver::calculate_rho()
 	return r;
 }
 
+double Solver::calculate_obj()
+{
+	double v = 0;
+	int ii;
+	for(ii=0;ii<l;ii++)
+		v += alpha[ii] * (G[ii] + p[ii]);
+	return v / 2;
+}
+
 //
 // Solver for nu-svm classification and regression
 //
@@ -1482,6 +1522,7 @@ public:
 		int start, j;
 		if((start = cache->get_data(i,&data,len)) < len)
 		{
+#pragma omp parallel for private(j)
 			for(j=start;j<len;j++)
 				data[j] = (Qfloat)(y[i]*y[j]*(this->*kernel_function)(i,j));
 		}
@@ -1758,6 +1799,7 @@ static void gtsvm_solve_c_svc(
 
 		GTSVM_CHECK(GTSVM_Optimize(context, &primal, &dual, repetitions));
 		//info("%f %f\n", primal, dual);
+		report_one(iter + repetitions, -dual);
 
 		if (2 * (primal - dual) < param->eps * (primal + dual))
 			break;
@@ -2010,6 +2052,8 @@ static decision_function svm_train_one(
 	memset(alpha, 0, sizeof(double)*prob->l);
 	Solver::SolutionInfo si;
 	if(param->svm_type == C_SVC){
+		report_set_clock();
+
 		int eze = param->eze, nchild = 4;
 		int **full_cidx = Malloc(int*, eze);
 		int **full_csize = Malloc(int*, eze);
@@ -2079,7 +2123,9 @@ static decision_function svm_train_one(
 			}
 		}
 		info("csize %d\n", prob->l);
+		report_init();
 		solve_c_svc(prob,param,alpha,&si,Cp,Cn);
+		report_fini();
 	} else {
 		switch(param->svm_type)
 		{
