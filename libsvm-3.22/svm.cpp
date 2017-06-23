@@ -2100,15 +2100,19 @@ static decision_function svm_train_one(
 				Solver::SolutionInfo subsi;
 				int csize = full_csize[ll][j];
 				if (csize == 0) continue;
+				bool all_same = true;
 				for(int k = 0 ; k < csize ; k++) {
 					sub_prob.x[k] = prob->x[full_cidx[ll][k+start]];
 					sub_prob.y[k] = prob->y[full_cidx[ll][k+start]];
 					sub_alpha[k] = alpha[full_cidx[ll][k+start]];
+					if (k > 0 && sub_prob.y[k] != sub_prob.y[k-1])
+						all_same = false;
 				}
 				sub_prob.l = csize;
 				info("csize %d\n", csize);
 
-				solve_c_svc(&sub_prob,&sub_param,sub_alpha,&subsi,Cp,Cn);
+				if (!all_same)
+					solve_c_svc(&sub_prob,&sub_param,sub_alpha,&subsi,Cp,Cn);
 
 				if(subsi.rho != 0) {
 					info("rho should be 0\n");
