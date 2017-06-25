@@ -1789,7 +1789,8 @@ static void gtsvm_solve_c_svc(
 
 	double primal = INF, dual = -INF;
 
-	for (; iter < max_iter; iter += repetitions) {
+	while (true)
+	{
 		counter -= repetitions;
 		while (counter <= 0)
 		{
@@ -1798,8 +1799,9 @@ static void gtsvm_solve_c_svc(
 		}
 
 		GTSVM_CHECK(GTSVM_Optimize(context, &primal, &dual, repetitions));
+		iter += repetitions;
 		//info("%f %f\n", primal, dual);
-		report_one(iter + repetitions, -dual);
+		report_one(iter, -dual);
 
 		if (param->target != 0)
 		{
@@ -1807,6 +1809,8 @@ static void gtsvm_solve_c_svc(
 				break;
 		}
 		else if (2 * (primal - dual) < param->eps * (primal + dual))
+			break;
+		else if (iter >= max_iter)
 			break;
 	}
 
