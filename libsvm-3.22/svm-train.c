@@ -40,6 +40,7 @@ void exit_with_help()
 	"-q : quiet mode (no outputs)\n"
 	"-eze : set eze\n"
 	"-G : use GTSVM\n"
+	"-target target : set target objective value (use with -G)"
 	);
 	exit(1);
 }
@@ -183,6 +184,7 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 	param.weight = NULL;
 	param.eze = 1;
 	param.use_gtsvm = 0;
+	param.target = 0;
 	cross_validation = 0;
 
 	// parse options
@@ -197,7 +199,10 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 				param.svm_type = atoi(argv[i]);
 				break;
 			case 't':
-				param.kernel_type = atoi(argv[i]);
+				if (strlen(argv[i-1]) == 7 && !strcmp(argv[i-1], "-target"))
+					param.target = atof(argv[i]);
+				else
+					param.kernel_type = atoi(argv[i]);
 				break;
 			case 'd':
 				param.degree = atoi(argv[i]);

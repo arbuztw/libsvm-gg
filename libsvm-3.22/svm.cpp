@@ -1801,7 +1801,12 @@ static void gtsvm_solve_c_svc(
 		//info("%f %f\n", primal, dual);
 		report_one(iter + repetitions, -dual);
 
-		if (2 * (primal - dual) < param->eps * (primal + dual))
+		if (param->target != 0)
+		{
+			if (-dual < param->target)
+				break;
+		}
+		else if (2 * (primal - dual) < param->eps * (primal + dual))
 			break;
 	}
 
@@ -2091,6 +2096,7 @@ static decision_function svm_train_one(
 		svm_parameter sub_param;
 		memcpy(&sub_param, param, sizeof(svm_parameter));
 		sub_param.eps *= 10;
+		sub_param.target = 0;
 
 		for(int ll = eze-1 ; ll >= 1 ; ll--) {
 			int ncluster = (int)pow(nchild, ll);

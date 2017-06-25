@@ -46,6 +46,7 @@ struct svm_parameter
 	int probability; /* do probability estimates */
 	int eze;
 	int use_gtsvm;
+	double target;
 };
 
 //
