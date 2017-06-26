@@ -15,6 +15,16 @@ Extra flags compared to LIBSVM:
 - `-G`: enable GTSVM backend
 - `-eze [1-5]`: specify clustering levels in DCSVM
 
+## Evaluation
+
+Since LIBSVM and GTSVM have different termination criteria, we compare times for
+each method to reach the best observed objective value, with fixed training
+parameters.
+
+Environment: Intel Core i7-4790, nVidia GeForce GTX TITAN X
+
+![covtype.train (l=464810, C=32, gamma=2)](/img/evaluation_covtype.png)
+
 ## Details
 
 [LIBSVM](https://www.csie.ntu.edu.tw/~cjlin/libsvm/) [1] is a popular SVM
